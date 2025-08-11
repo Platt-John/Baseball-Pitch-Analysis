@@ -1,0 +1,704 @@
+---
+title: "Baseball Pitch Analytics"
+author: "John Platt"
+date: "12/5/2021"
+output: 
+  html_document:
+    code_folding: hide
+---
+
+# Introduction
+
+This project analyzes different aspects of MLB pitches from 2015-2018. It will be interesting to look deeper into the mechanics behind MLB pitches that were thrown during these years and see if we can predict different aspects of MLB pitches (such as pitch speed). The data frame that this project utilizes contains metadata about every single pitch that was thrown in the MLB from 2015-2018. This metadata includes several location variables involving: the specific position of pitches when they are thrown at their release point, the specific position of pitches when they cross home plate, and the general location or zone of the batters box that pitches hit when they cross home plate. In addition, this metadata includes variables about the speed, spin rate, breaking ball angle, velocity, and acceleration of pitches. Plus, not only is there metadata about the pitches themselves, but there is also metadata on the situation when pitches are thrown: the number of outs, the number of pitches that have been thrown in an at bat, the strike count, the ball count, if there is a batter on a certain base, etc. Regarding how this data was collected, to collect the data about the pitches themselves, a PITCHf/x operating system was used to track the location, speed, velocity, pitch accelation, type of pitch thrown, etc. by using three cameras permanently mounted in MLB stadiums. The PITCHf/x system was used to track pitches in this data from 2015-2017. This system was then replaced mid way through 2017 by the slightly more accurate TrackMan system which records pitching stats for MLB statcast. The trackMan system was then used to track pitches for part of 2017 and 2018 in this data set.
+
+I will look to answer the following big question about this data set: how can we predict the start speed of a pitch the next time a pitch is thrown in an MLB game? To do that, I will investigate if there is a relationship between the speed of a pitch when initially released and the initial horizontal acceleration (left/right change in speed), spin direction of MLB pitches (in degrees), spin rate (in revolutions per minute), year, the result of the pitch thrown, etc. I will also look at distributions of horizontal acceleration and pitch spin direction between different pitch types.
+
+# Ethical considerations
+
+The original purpose of this dataset was to track the accuracy of umpires in calling results of pitches. In addition, it is important to understand too that this data did not have a consistent method of data collection as the MLB organization switched its operation system that collects this data about pitches from PITCHf/x to Trackman in 2017. This may mean that when the MLB used its new and improved operation system of Trackman, it may mean that the data about pitches in this dataset became slightly more accurate in 2017 through 2018. This means that the data about MLB pitches was not as accurate from 2015 to 2017 with it using the older PITCHf/x. In addition, there is a very high chance that there was clear technological error or slight technological error involved in the collection of this data. Both of these operation systems have had a couple of questionable algorithms when trying to determine some of the metrics in this data. For example, it is shown in this pitching data set that there is not full confidence in the pitch types that these pitching operations found each time a pitch was thrown. This data set has a type_confidence variable (confidence in each pitch type found where 2 means full confidence). This variable indicates the chance that each of the operation systems found in the collection of this data the correct pitch type for that particular pitch thrown. This means that the people of the MLB are acknowledging that pitch type is one part of their data that for sure has some error involved that users of the data should at least acknowledge. There are several other metrics in this pitching data that are not fully accurate or don't have data for every single pitch thrown too. Thus, in my analysis, considering possible inaccuracies in this data, I need to be truthful and professional by acknowledging that even if I get an interesting result, it may not be fully accurate.
+
+# Data Explanation and Exploration
+
+This data set of MLB pitches from 2015-2018 is a very large data set as the rows/observations of this data represent individual pitches thrown in the MLB from 2015-2018 (almost 3 million). This presents a challenge because this means that there may be stuff in this dataset that may be unnecessary for me to include in my analysis in order to answer the questions above. I will look at descriptive visualizations of different types of variables in my data set in order to figure out what I need to include more in my analysis of this data and discover stuff that I did not already know about this data. The key variables that I will be looking at to answer questions about my pitching data include: pitch_type (pitch type), ab_id (first four digits represent the year the batter was at bat), ax (horizontal acceleration in feet per second per second), spin_rate (spin rate of pitch in revolutions per minute), code (result of pitch thrown), spin_dir (spin direction of a pitch in degrees), and zone (the zone of the batters box the pitch hits).
+
+```{r libraries and dataset, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(tidymodels)
+library(GGally)
+library(stringr)
+library(ggfortify)
+library(ggthemes)
+library(ggmap)
+library(sp)
+library(rworldmap)
+library(gapminder)
+library(ggthemes)
+PitchingData<-read.csv('pitches.csv')
+```
+
+```{r labeling factor levels and renaming columns, message=FALSE,warning=FALSE}
+PitchingData$zone<-factor(PitchingData$zone, 
+                    levels=c(1,2,3,4,5,6,7,8,9,11,12,13,14),
+                          labels=c('Upper left','Top middle','Upper right','Middle left',"Middle",'Middle right','Bottom left','Bottom middle','Bottom right','Upper Outside left',"Upper Outside right","Bottom Outside left","Bottom outside right"))
+PitchingData$on_1b<-factor(PitchingData$on_1b,
+                           levels=c(0,1),
+                             labels=c('Not on base','On base'))
+PitchingData$on_2b<-factor(PitchingData$on_2b,
+                           levels=c(0,1),
+                           labels=c('Not on base','On base'))
+PitchingData$on_3b<-factor(PitchingData$on_3b,
+                           levels=c(0,1),
+                           labels=c('Not on base','On base'))
+PitchingData<-rename(PitchingData,pitch_result=code)
+PitchingData<-rename(PitchingData,simplified_pitchresult=type)
+```
+
+```{R mutate}
+PitchingData<-filter(PitchingData,pitch_type!='')
+PitchingData<-filter(PitchingData,pitch_result!='')
+PitchingData<-PitchingData%>%
+  mutate(pitch_type=as.character(pitch_type),
+                pitch_type=ifelse(pitch_type=='CH',"Changeup",pitch_type),
+                    pitch_type=as.factor(pitch_type))
+PitchingData<-PitchingData%>%
+  mutate(pitch_type=as.character(pitch_type),
+         pitch_type=ifelse(pitch_type=='CU',"Curveball",pitch_type),
+         pitch_type=as.factor(pitch_type))
+PitchingData<-PitchingData%>%
+  mutate(pitch_type=as.character(pitch_type),
+         pitch_type=ifelse(pitch_type=='EP',"Eephus",pitch_type),
+         pitch_type=as.factor(pitch_type))
+PitchingData<-PitchingData%>%
+  mutate(pitch_type=as.character(pitch_type),
+         pitch_type=ifelse(pitch_type=='FC',"Cutter",pitch_type),
+         pitch_type=as.factor(pitch_type))
+PitchingData<-PitchingData%>%
+  mutate(pitch_type=as.character(pitch_type),
+         pitch_type=ifelse(pitch_type=='FF',"Four-seam Fastball",pitch_type),
+         pitch_type=as.factor(pitch_type))
+PitchingData<-PitchingData%>%
+  mutate(pitch_type=as.character(pitch_type),
+         pitch_type=ifelse(pitch_type=='FO',"Forkball",pitch_type),
+         pitch_type=as.factor(pitch_type))
+PitchingData<-PitchingData%>%
+  mutate(pitch_type=as.character(pitch_type),
+           pitch_type=ifelse(pitch_type=='FS',"Splitter",pitch_type),
+         pitch_type=as.factor(pitch_type))
+PitchingData<-PitchingData%>%
+  mutate(pitch_type=as.character(pitch_type),
+         pitch_type=ifelse(pitch_type=='FT',"Two-seam Fastball",pitch_type),
+         pitch_type=as.factor(pitch_type))
+PitchingData<-PitchingData%>%
+  mutate(pitch_type=as.character(pitch_type),
+         pitch_type=ifelse(pitch_type=='IN',"Intentional ball",pitch_type),
+         pitch_type=as.factor(pitch_type))
+PitchingData<-PitchingData%>%
+  mutate(pitch_type=as.character(pitch_type),
+         pitch_type=ifelse(pitch_type=='KC',"Knuckle curve",pitch_type),
+         pitch_type=as.factor(pitch_type))
+PitchingData<-PitchingData%>%
+  mutate(pitch_type=as.character(pitch_type),
+         pitch_type=ifelse(pitch_type=='KN',"Knuckle ball",pitch_type),
+         pitch_type=as.factor(pitch_type))
+PitchingData<-PitchingData%>%
+  mutate(pitch_type=as.character(pitch_type),
+         pitch_type=ifelse(pitch_type=='PO',"Pitchout",pitch_type),
+         pitch_type=as.factor(pitch_type))
+PitchingData<-PitchingData%>%
+  mutate(pitch_type=as.character(pitch_type),
+         pitch_type=ifelse(pitch_type=='SC',"Screwball",pitch_type),
+         pitch_type=as.factor(pitch_type))
+PitchingData<-PitchingData%>%
+  mutate(pitch_type=as.character(pitch_type),
+         pitch_type=ifelse(pitch_type=='SI',"Sinker",pitch_type),
+         pitch_type=as.factor(pitch_type))
+PitchingData<-PitchingData%>%
+  mutate(pitch_type=as.character(pitch_type),
+         pitch_type=ifelse(pitch_type=='SL',"Slider",pitch_type),
+         pitch_type=as.factor(pitch_type))
+PitchingData<-PitchingData%>%
+  mutate(pitch_type=as.character(pitch_type),
+         pitch_type=ifelse(pitch_type=='UN',"Unknown",pitch_type),
+         pitch_type=as.factor(pitch_type))
+PitchingData<-PitchingData%>%
+  mutate(pitch_type=as.character(pitch_type),
+         pitch_type=ifelse(pitch_type=='FA',"Four-seam Fastball",pitch_type),
+         pitch_type=as.factor(pitch_type))
+PitchingData<-PitchingData%>%
+  mutate(pitch_type=as.character(pitch_type),
+         pitch_type=ifelse(pitch_type=='AB',"Automatic ball",pitch_type),
+         pitch_type=as.factor(pitch_type))
+PitchingData<-PitchingData%>%
+  mutate(pitch_result=as.character(pitch_result),
+         pitch_result=ifelse(pitch_result=='B',"Ball",pitch_result),
+         pitch_result=as.factor(pitch_result))
+PitchingData<-PitchingData%>%
+  mutate(pitch_result=as.character(pitch_result),
+         pitch_result=ifelse(pitch_result=='*B',"Ball in dirt",pitch_result),
+         pitch_result=as.factor(pitch_result))
+PitchingData<-PitchingData%>%
+  mutate(pitch_result=as.character(pitch_result),
+         pitch_result=ifelse(pitch_result=='S',"Swinging Strike",pitch_result),
+         pitch_result=as.factor(pitch_result))
+PitchingData<-PitchingData%>%
+  mutate(pitch_result=as.character(pitch_result),
+         pitch_result=ifelse(pitch_result=='C',"Called Strike",pitch_result),
+         pitch_result=as.factor(pitch_result))
+PitchingData<-PitchingData%>%
+  mutate(pitch_result=as.character(pitch_result),
+         pitch_result=ifelse(pitch_result=='F',"Foul",pitch_result),
+         pitch_result=as.factor(pitch_result))
+PitchingData<-PitchingData%>%
+  mutate(pitch_result=as.character(pitch_result),
+         pitch_result=ifelse(pitch_result=='T',"Foul Tip",pitch_result),
+         pitch_result=as.factor(pitch_result))
+PitchingData<-PitchingData%>%
+  mutate(pitch_result=as.character(pitch_result),
+         pitch_result=ifelse(pitch_result=='L',"Foul Bunt",pitch_result),
+         pitch_result=as.factor(pitch_result))
+PitchingData<-PitchingData%>%
+  mutate(pitch_result=as.character(pitch_result),
+         pitch_result=ifelse(pitch_type=='I',"Intentional Ball",pitch_result),
+         pitch_result=as.factor(pitch_result))
+PitchingData<-PitchingData%>%
+  mutate(pitch_result=as.character(pitch_result),
+         pitch_result=ifelse(pitch_result=='W',"Swinging Strike (Blocked)",pitch_result),
+         pitch_result=as.factor(pitch_result))
+PitchingData<-PitchingData%>%
+  mutate(pitch_result=as.character(pitch_result),
+         pitch_result=ifelse(pitch_result=='M',"Missed Bunt",pitch_result),
+         pitch_result=as.factor(pitch_result))
+PitchingData<-PitchingData%>%
+  mutate(pitch_result=as.character(pitch_result),
+         pitch_result=ifelse(pitch_result=='P',"Pitchout",pitch_result),
+         pitch_result=as.factor(pitch_result))
+PitchingData<-PitchingData%>%
+  mutate(pitch_result=as.character(pitch_result),
+         pitch_result=ifelse(pitch_result=='Q',"Swinging pitchout",pitch_result),
+         pitch_result=as.factor(pitch_result))
+PitchingData<-PitchingData%>%
+  mutate(pitch_result=as.character(pitch_result),
+         pitch_result=ifelse(pitch_result=='R',"Foul pitchout",pitch_result),
+         pitch_result=as.factor(pitch_result))
+PitchingData<-PitchingData%>%
+  mutate(pitch_result=as.character(pitch_result),
+         pitch_result=ifelse(pitch_result=='X',"In play, out(s)",pitch_result),
+         pitch_result=as.factor(pitch_result))
+PitchingData<-PitchingData%>%
+  mutate(pitch_result=as.character(pitch_result),
+         pitch_result=ifelse(pitch_result=='D',"In play, no out(s)",pitch_result),
+         pitch_result=as.factor(pitch_result))
+PitchingData<-PitchingData%>%
+  mutate(pitch_result=as.character(pitch_result),
+         pitch_result=ifelse(pitch_result=='E',"In play, runs",pitch_result),
+         pitch_result=as.factor(pitch_result))
+PitchingData<-PitchingData%>%
+  mutate(pitch_result=as.character(pitch_result),
+         pitch_result=ifelse(pitch_result=='H',"Hit by pitch",pitch_result),
+         pitch_result=as.factor(pitch_result))
+```
+
+First, lets look at the number of pitches in this dataset that had different pitch types
+
+```{r barplot of pitch type}
+ggplot(PitchingData,aes(x=pitch_type, fill=pitch_type))+
+geom_bar()+
+  labs(x='Pitch Type',y='Number of pitches', title='The number of pitches with different MLB
+       Pitch Types', caption='This bar graph shows the number of pitches with different pitch \ntypes in the MLB from 2015-2018.',
+       fill='Pitch Type')+
+  theme_few()+
+  theme(axis.text.x = element_text(angle=75, vjust=.6))+
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+Based on this bar graph, unsurprisingly, the most common pitch types included in this data set are Four seam Fastball, Slider, Two seam Fastball, Changeup, Sinker, and Curveball. The four seam fastball is especially the most common with over 1 million pitches in our dataset that were four seam fastballs. I will consider these pitch types the most in my analysis. There are several pitch types that don't appear to show up at all as even one pitch in our bar graph or barely show up, so it may not be necessary to have them in our analysis since they are very rare pitch types anyway. So, I will get rid of the pitch types that aren't common out of my dataset including: Automatic ball, Eephus, Forkball, Pitchout, Screwball, Unknown, Intentional ball, Knuckle ball, and Splitter.
+
+```{R filtering out uncommon pitch types and creating a new bar graph of the same idea}
+#Filter the pitch types that aren't very common out of the Pitching data
+PitchingData<-PitchingData %>%
+  filter(pitch_type!='Automatic ball',pitch_type!='Eephus'&pitch_type!='Forkball'&pitch_type!='Pitchout'&pitch_type!='Screwball'&pitch_type!='Unknown'&pitch_type!='Intentional ball'&pitch_type!='Knuckle ball'&pitch_type!='Splitter')
+#Checking to see if the filter worked
+ggplot(PitchingData,aes(x=pitch_type, fill=pitch_type))+
+  geom_bar()+
+  labs(x='Pitch Type',y='Number of pitches', title='The number pitches with different MLB
+       Pitch Types', caption='This bar graph shows the number of pitches with different pitch \ntypes in the MLB from 2015-2018.',
+       fill='Pitch Type')+
+  theme_few()+
+  theme(axis.text.x = element_text(angle=75, vjust=.5))+
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+Now this new bar graph only has MLB pitch types that I care about.
+
+Next, lets take a look at the number of pitches in this dataset that had different pitch results.
+
+```{R bar graph of pitch results}
+ggplot(PitchingData,aes(pitch_result, fill=pitch_result))+
+geom_bar()+
+  labs(x="Result of the pitch thrown",y="Number of pitches",title="Number of pitches that had different results",fill='Pitch Result',caption='This bar graph shows the number of pitches with different\n results in the MLB from 2015-2018.')+
+  theme_few()+
+  theme(axis.text.x = element_text(angle=75, vjust=.6))+
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+It appears, unsurprisingly, that the most five most common results from pitches from 2015-2018 in the MLB are Ball, Called Strike, Foul, Swinging Strike, and In play, out(s). However, there are pitch results that also have occurred not nearly as often as these ones that we can barely see on our bar graph such as Hit by pitch, Foul Bunt, Missed Bunt, Foul Tip, and Swinging Strike (Blocked). To make my analysis more simple and because it will have a minimal impact on my analysis, I will remove any pitches from the data set that had a result of Hit by pitch, Foul Bunt, Missed Bunt, Foul Tip, and Swinging Strike (Blocked) since they don't happen that often.
+
+```{r filter uncommon pitch results out}
+PitchingData<-PitchingData %>%
+filter(pitch_result!='Foul Bunt'&pitch_result!='Hit by pitch'&pitch_result!='Missed Bunt'&pitch_result!='Swinging Strike (Blocked)'&pitch_result!='Foul Tip')
+```
+
+```{R pitch result bar graph}
+ggplot(PitchingData,aes(pitch_result, fill=pitch_result))+
+geom_bar()+
+  labs(x="Result of the pitch thrown",y="Number of pitches",title="Number of pitches that had different results",fill='Pitch Result',caption='This bar graph shows the number of pitches with different\n results in the MLB from 2015-2018.')+
+  theme_few()+
+  theme(axis.text.x = element_text(angle=75, vjust=.6))+
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+Now this new bar graph only has pitch results that I care about.
+
+Additionally, lets learn more about the acceleration variable I am interested in about horizontal acceleration (ax).
+
+```{R histogram of horizontal acceleration}
+ggplot(PitchingData,aes(ax))+
+  geom_histogram(bins=40,fill='lightblue')+
+  labs(x="The horizontal acceleration when the pitch is initially\n released (in feet per second per second)",y='Number of pitches',title="Distribution of horizontal acceleration from where pitches are\n initially released",caption='This histogram shows the distribution of horizontal\n acceleration when pitches are intially released in the MLB from 2015-2018.')+
+  theme_few()+
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+Interestingly, this histogram of the distribution of horizontal acceleration (talking about left/right motion of pitches) when MLB pitches are initially released takes on a slightly bimodal (two peaks in the distribution) and roughly symmetric shape. It appears to be centered around 0, meaning that when pitches are initially released, on average, they do not speed up at all. The values in this distribution of horizontal acceleration when MLB pitches are initially released generally appear to be ranging from -25 to 25, meaning that there is a combination of pitches that horizontally decelerate (slow down) and horizontally accelerate (speed up). Yet, there appears to be slightly more MLB pitches in this distribution of horizontal acceleration that slow down. It would be interesting to see which pitch types more commonly have a negative horizontal acceleration (slow down when they are released) and which pitch types more commonly have a positive horizontal acceleration (speed up when they are released). In addition, looking at this histogram, I would like to see the relationship between horizontal acceleration when a pitch is initially released and the speed of a pitch when a pitch is initally released.
+
+Finally, lets see more information on the variable I am interested in about the spin direction (in degrees between 0 and 360) of MLB pitches (spin_dir)
+
+```{r histogram of spin direction}
+ggplot(PitchingData,aes(spin_dir))+
+  geom_histogram(bins=40,fill='darkred')+
+  labs(x="The spin direction of the pitch (in degrees)",y='Number of pitches',title="Distribution of spin direction of pitches",caption='This histogram shows the distribution\n of spin direction of pitches in the MLB from 2015-2018.')+
+theme(plot.title = element_text(hjust = 0.6))+
+  theme_few()
+```
+
+This histogram of the distribution of spin direction of MLB pitches, ranging between 0 and 360 degrees, appears to have a roughly symmetric shape and centered at around 180 degrees (upward or foward spin). Yet, there appears to be more pitches that have a spin direction between 0 degrees (downward or backward spin) and about 180 degrees (upward or forward spin) than pitches that have a spin direction between about 250 degrees (rightward spin) and 360 degrees (downward or backward spin). This indicates that MLB pitches in this data set more commonly have a leftward spin (at about 90 degrees) than a rightward spin (at about 270 degrees). In addition, with the histogram having a lot more of its values between 180 and 210 compared to at 0 or 360, MLB pitches in this dataset more commonly have had a forward spin than backward spin. It would be interesting to see the relationship between spin direction and the speed when a pitch is initially released. I would want to see the spin direction of different pitch types in the MLB from 2015-2018.
+
+# Statistical Analysis and Interpretation
+
+First, I will be analyzing the relationship between pitch type and horizontal acceleration when the pitch is initially released.
+
+```{r violin plot}
+ggplot(PitchingData,aes(x=pitch_type,y=ax,fill=pitch_type))+
+  geom_violin()+
+  labs(x="Pitch Type",y='Horizontal acceleration when a pitch\n is initially released',title="Distribution of horizontal acceleration from where pitches are\n initially released for different pitch types",caption='These violin plots show the distribution of initial horizontal acceleration\n for different types of pitches in the MLB from 2015-2018.',fill="Pitch Type")+
+  theme_few()+
+  theme(axis.text.x = element_text(angle=75, vjust=.6))+
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+Looking at the distribution of horizontal acceleration (left/right movement) for different pitch types on these Violin plots, it appears that these different distributions of horizontal acceleration differ between these types of pitches in a variety of ways. The distribution of horizontal acceleration for the Change up pitch appears to be bimodal with more pitches on the negative end of horizontal acceleration, meaning its average horizontal acceleration is probably negative (slowing down horizontally when initially released). The sinker and two-seam fastball distributions are similar to the Changeup distribution with a bimodal shape and leaning towards the negative side of horizontal acceleration. In addition, all three distributions of horizontal acceleration including Changeup, Slider, and Two-seam fastball appears to have their points on horizontal acceleration in two seperate groups or clusters (points on the positive side and points on negative side, no inbetween). The two-seam fastball distribution of horizontal acceleration appears to have a larger variability than the Changeup and Sinker distributions. On the other hand, the Curveball and Knuckle Curve distributions appear to all be centered around a positive average horizontal acceleration (speeding up horizontally when initially released). The Cutter and Slider distributions appear to be normally distributed centered around a horizontal acceleration of zero (speed stays constant when initially released), while the Curveball and Knuckle curve distributions appear to be skewed left. Finally, the Four-seam Fastball distribution appears to be skewed right, meaning that, like the Changeup, Sinker, and Two-Seam Fastball distributions, it has more of its points around the negative end of horizontal acceleration. This indicates that the Four-seam Fastball distribution is centered around a negative horizontal acceleration.
+
+# Next steps after describing the distribution of horizontal acceleration between different pitch types
+
+Based on these violin plots, the pitch types of Change up, Four-seam Fastball, Sinker, and Two-seam Fastball appear to have a negative horizontal acceleration on average. The pitch types of Curve ball and Knuckle Curve appear to have a positive horizontal acceleration on average. I will use two-sample t-tests to compare the average horizontal acceleration between these pitch types that I think differ in average horizontal acceleration. In this case, I will do a two sample t-test for the most common pitch type in our data set (Four-seam Fastball) and the somewhat common Knuckle Curve. The pitch types of Cutter and Slider appear to have an acceleration near 0 on average. Thus, I will use a one-sample t-test to see if the second most common pitch type in our data set, Slider, has a horizontal acceleration equal to 0.
+
+# Two sample t-test comparing mean horizontal acceleration between Four-Seam Fastball and Knuckle Curve
+
+```{r two sample t-test}
+knfb_pitches<-PitchingData %>%
+  filter(pitch_type=='Four-seam Fastball'|pitch_type=='Knuckle curve')
+t.test(ax~pitch_type,knfb_pitches)
+```
+
+The t-statistic, degrees of freedom, and p-value in this two sample t-test came out to be -335.07, 89235, and 2.2e-16 (.00000...2) respectively. The 95 percent confidence interval came out to be between -8.050244 and -7.956613 (narrow likely due to very large sample sizes) with its point estimate (middle of the confidence interval) or the sample mean difference being about 8.0034285 (high). Since our p-value (2.2e-16) is less than any reasonable significance level, we can reject the null hypothesis that there is no difference between the pitch type of Four-seam Fastball and the pitch type of Knuckle curve in mean horizontal acceleration. We have convincing evidence that that there is a difference between the pitch type of Four-seam Fastball and the pitch type of Knuckle curve in mean horizontal acceleration.
+
+This t-test confirms what I saw in the violin plots of horizontal acceleration by pitch type that there is a difference in horizontal acceleration when pitches are initially released between the Four-seam Fastball pitch type (negative interestingly at -3.876666) and the Knuckle curve pitch type (positive at 4.126762).
+
+Now, with a one-sample t-test of the slider pitch type, lets see if the mean horizontal acceleration is equal to 0 for that pitch type.
+
+# One sample t-test of the slider pitch type
+
+```{r one sample t-test for slider}
+slider_pitches<-PitchingData%>%
+  filter(pitch_type=='Slider')
+
+t.test(slider_pitches$ax,mu=0,alternative = 'two.sided')
+```
+
+The t-statistic, degrees of freedom, and p-value in this t-test came out to be 275.73, 435500, and 2.2e-16 (.00000...2) respectively. The 95 percent confidence interval came out to be between 2.105065 and 2.135207 (narrow likely due to a very large sample size) with its point estimate (middle of the confidence interval) or the sample mean being about 2.120136 (noticeably greater than 0). Since our p-value (2.2e-16) is less than any reasonable significance level, we can reject the null hypothesis that the mean horizontal acceleration of the Slider pitch type is 0. We have convincing evidence that the mean horizontal acceleration of the Slider pitch type is not equal to 0.
+
+This t-test rejects what I saw in the violin plots of horizontal acceleration by pitch type that the mean horizontal acceleration of the Slider pitch type is equal to 0. A sample mean of 2.123 for Slider is somewhat noticeably higher than 0 since horizontal acceleration is mostly numbered between -20 and 20.
+
+Now we know that horizontal acceleration differs between several pitch types and that it is generally either positive or negative on average across all pitch types.
+
+Lets now see the relationship between the speed of a pitch when it is initially released (start_speed) and horizontal acceleration when a pitch is initially released (ax).
+
+# Analyzing the relationship between speed when a pitch is initially released and horizontal acceleration when a pitch is initially released
+
+```{r scatterplot between start speed and ax, warning=FALSE,message=FALSE}
+ggplot(PitchingData,aes(x=ax,y=start_speed))+
+  geom_jitter(alpha=1/10)+
+  geom_smooth(method='lm')+
+labs(x='Horizontal acceleration (in feet per second per second) when a pitch\n is initially released',y='Speed (in miles per hour) when a pitch\n is initially released',title='Horizontal acceleration vs speed in miles per hour when pitches\n are initially released', caption='This sccaterplot shows the relationship between horizontal acceleration and speed\n when pitches are initially released in the MLB from 2015-2018')+
+  theme_few()+
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+```{r correlation between start speed and ax}
+cor(PitchingData$ax,PitchingData$start_speed)
+cor.test(PitchingData$ax,PitchingData$start_speed)
+```
+
+Looking the scatterplot showing the relationship between the horizontal acceleration of pitches and the speed of pitches when they are initially released, these appears to be a slightly negative, non-linear, and weak relationship. The relationship between the horizontal acceleration of pitches and the speed of pitches when they are initially relased is confirmed to be negative and weak by the correlation value above of -.2878377 between horizontal acceleration and start speed. The correlation is further proven to be negative and not equal to 0 with the correlation test above showing a p-value of 2.2e-16 along with our correlation value. This p-value, with it being less than any reasonable significance level, indicates that the null hypothesis, where the correlation between horizontal acceleration and start speed is 0, can be rejected. We have convincing evidence that the true correlation is not equal to 0. Based on these results, it does not seem that we have that much of a clear relationship between horizontal acceleration and start speed for pitches although it does appear that there may be slightly more slow pitches on the faster, more positive end of horizontal acceleration.
+
+Lets do a simple linear regression to look deeper into this relationship.
+
+```{r linear regression between horizontal acceleration and initial pitch speed}
+pitching_axspeed_model<-linear_reg()%>%
+  set_engine('lm')%>%
+  fit(start_speed~ax,data=PitchingData)
+summary(pitching_axspeed_model$fit)
+```
+
+# Interpretation of the simple linear regression about the relationship between horizontal acceleration and initial speed of MLB pitches
+
+Model inputs- We gave this model actual values of the speed of pitches when initially released and horizontal acceleration in an effort to obtain the linear regression line showcasing this relationship.
+
+Residuals (actual initial pitch speed-predicted initial pitch speed)- With the minimum residual being much further away from the median than the maximum residual and the median not being close to zero, the residuals don't appear to be normally distributed at first glance. This indicates that we may not have a good and reliable model.
+
+Coefficients- The y-intercept of this linear regression model came out to be 88.210529, meaning that when horizontal acceleration is zero, initial pitch speed is 88.210529. This y-intercept is shown to be statistically significant with a very low p-value (\<2e-16). The slope of this linear regression model came out to be -0.157689, meaning that for each additional 1 point increase in horizontal acceleration, initial pitch speed goes down by -0.157689. With a slope of -0.157689 and a very low p-value (\<2e-16), it is statistically proven that as horizontal acceleration increases, initial pitch speed slowly decreases.
+
+R2 Value (variability in start_speed accounted for)- The R2 Value in this simple linear regression came out to be 0.08285, meaning that 8.285% of the variability in the initial speed of a pitch is accounted for by horizontal acceleration. This R2 value is shown to be statistically significant with a p-value of 2.2e-16 (.000...2) Considering that pitch speed is a relatively unpredictable measure, an R2 value of 0.08285 is not bad, but not great either. Horizontal acceleration does an ok job on predicting initial pitch speed.
+
+Takeaways from this model- We cannot be confident that this a reliable model yet because the residuals did not appear to be normally distributed at first glance. However, it was shown in this model that as horizontal acceleration increases, the initial speed of a pitch slightly decreases. In addition, horizontal acceleration may do an ok job in predicting initial speed of pitches overall. Lets create a QQ plot of the residuals to see if this model is truly reliable.
+
+```{r residuals QQ plot}
+pitching_horacc_res <- rstandard(pitching_axspeed_model$fit)
+ggplot(,aes(sample=pitching_horacc_res)) +
+  geom_qq() +
+  geom_qq_line() +
+  labs(y="Standardized Residuals\n (Actual start speed-predicted start speed)", x="Normal Scores",title='Pitching start speed and horizontal acceleration model residuals vs\n a normal distribution of residuals (the line)',caption='This QQ plot shows the distribution of residuals\n in the start speed and horizontal acceleration model compared to a normal distribution.')+
+  theme_few()+
+theme(plot.title = element_text(hjust = 0.5))
+```
+
+Looking at this QQ plot, it appears we have an ok model as the residuals of our model in this follow a normal distribution or closely follow a normal distribution in most of this plot besides at the beginning where the residuals clearly dip well below the line.
+
+Time to switch gears now and focus on if there is a difference between the year of 2015 and the year of 2018 in the speed of a pitch when initially released. Lets also see if the year a given pitch is thrown could help predict the speed when a pitch is initially released.
+
+# Analyzing the initial speed of a pitch by the years of 2015, 2016, 2017, and 2018
+
+```{r adding a year variable to our pitching dataset}
+PitchingData<-PitchingData %>%
+  mutate(year=strtrim(PitchingData$ab_id,4))
+```
+
+```{R histogram of start_speed by year, message=FALSE}
+ggplot(PitchingData,aes(start_speed))+
+  geom_histogram(aes(fill=year))+
+  labs(x='Year',y='Speed when a pitch is initially released',title='Distribution of speed when a pitch is\n initially released by year',caption='These histograms show the distributions of speed\n when pitches are initially released in the years of 2015-2018 in the MLB',fill='Year')+
+  theme_few()+
+  facet_wrap(~year)+
+  theme(strip.text.x = element_text(
+    size = 12, color = "darkblue", face = "bold"))+
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+All these distributions of start speed of MLB pitches appear to be skewed right, have the same center (around 85-90 mph), and the same variability (a range around 70-100 mph for each pitch). There doesn't appear to be much of a difference in the speed of MLB pitches when they are initially released between the years of 2015, 2016, 2017, and 2018. To confirm our findings, lets compare the mean start pitching speed of the earliest and latest years in this data set: 2015 and 2018.
+
+# Two sample t-test comparing mean initial pitch speed between the years of 2015 and 2018 in this dataset
+
+```{r two-samp t-test between the years of 2015 and 2018}
+PitchingData1518<-PitchingData%>%
+  filter(year==2015|year==2018)
+t.test(start_speed~year,PitchingData1518)
+```
+
+The t-statistic, degrees of freedom, and p-value in this t-test came out to be -34.486, 1351210, and 2.2e-16 respectively. Our 95 percent confidence interval for mean start speed difference between the years of 2015 and 2018 came out to be between -0.3671157 and -0.3276311 with the point estimate (sample mean start speed difference) being 0.3473734 miles per hour (seems small). With our p-value (2.2e-16) being less than any reasonable significance level, we can reject the null hypothesis that there is no difference in the speed of a pitch when initially released in the MLB between the year of 2015 and the year of 2018. We have significant evidence that there is a difference in the speed of a pitch when initially released (start_speed) between the year of 2015 and the year of 2018 in the MLB.
+
+It is not surprising that we got a statistically significant result on a difference in pitch speed between the years of 2015 and 2018 with even what may be considered a small difference (0.3473734) because there were so many pitches thrown in the years of 2015 and 2018. However, to any MLB batters or pitcher that throws a baseball, this may not seem like much of a difference. However, despite this t-test being contradictory, it still may be possible that the year a pitch is thrown could predict start_speed since that difference at least is not super low like .01 or .09.
+
+Now lets focus on the relationship between the speed of a pitch when it is initially released and the pitch spin direction. In addition, lets look at pitch spin direction between different pitch types.
+
+# Analyzing the relationship between spin direction of MLB pitches and initial speed of MLB pitches
+
+```{r scatterplot of start speed vs spin direction,message=FALSE,warning=FALSE}
+ggplot(PitchingData,aes(x=spin_dir,y=start_speed))+
+  geom_jitter(alpha=1/10)+
+  geom_smooth(method='lm')+
+labs(x='Spin direction',y='Speed (in miles per hour) when a pitch\n is initially released',title='Spin direction in degrees vs speed in miles per hour when pitches are initially released', caption='This scatterplot shows the relationship between\n spin direction and speed when pitches are initially released in the MLB from 2015-2018')+
+  theme_few()+
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+The relationship between the initial speed of a pitch and spin direction is an interesting one. There appears to be a weak, non-linear, and neither a positive nor negative relationship between pitch spin direction and initial speed of a pitch. Yet, pitch start speed appears to reach about 100 miles per hour twice in this scatterplot at around a spin direction of 180 degrees (forward pitch spin) and a spin direction of 220 degrees (between a rightward and forward pitch spin). Initial pitch speed is then between 70 and 90 once this scatter plot hits 360 degrees (backward pitch spin). Lets see more about this relationship despite there not being a clear positive or negative relationship.
+
+Let's run a simple (two variable) linear regression test showing more information about the relationship between pitch spin direction and pitch initial speed
+
+```{r linear regression of spin_dir vs start_speed}
+pitching_spindirspeed_model<-linear_reg()%>%
+  set_engine('lm')%>%
+  fit(start_speed~spin_dir,data=PitchingData)
+summary(pitching_spindirspeed_model$fit)
+```
+
+# Interpretation of Simple Linear Regression of initial MLB pitch speed and MLB pitch spin direction
+
+Model input-We gave this linear regression model actual values of initial pitching speed and pitch spin direction in order to obtain the linear regression line that represents this relationship.
+
+Residuals (Actual start_speed-predicted start-speed)- With the mimimum residual (-45.330) appearing to be much further away from the median than the maximum residual (17.183) and a median not close to 0 (1.190), it appears the residuals of this model may not be normally distributed. We cannot be confident that this is a good model.
+
+Coefficients- The y-intercept of this simple linear regression model came out to be 8.3950, meaning that when spin direction is 0, the initial speed of a pitch is predicted to be 8.3950. With a very low p-value for this y-intercept (\<2e-16), this y-intercept is statistically significant. The slope of this simple linear model came out to be .02570, meaning that for every additional 1 point increase in spin direction (remember that spin direction is numbered from 0 to 360), the initial speed of a pitch is predicted to increase by .02570. With a slope for spin direction of .02570 and a very low p-value (\<2e-16), considering that spin direction can be as high as 360, the slope for spin direction is statistically significant. In addition, the initial speed of a pitch may slightly increase for every additional 1 point increase in spin direction. So, the initial speed of a pitch is slightly higher when the spin direction of a pitch is higher based on this model.
+
+R2 Value (variability in initial pitch speed accounted for)- The R2 value in this simple linear regression model came out to be .08453, meaning that 8.453% of the variability in the initial speed of MLB pitches from 2015-2018 is accounted for by the spin direction of MLB pitches from 2015-2018. Considering the unpredictability of MLB pitch speed, this R2 value isn't too bad, but it isn't great either. This value indicates that pitch spin rate may do an ok job at predicting initial pitch speed.
+
+Takeaways from this model- The reliability of this model is questionable given that the residuals don't appear to be normally distributed at first glance. However, I will create a histogram of residuals to validate this model to see if that is actually true. I also found that the spin direction of a pitch may do an ok job at predicting initial pitch speed and that as spin direction increases, initial pitch speed generally appears to slightly increase in this model.
+
+Now lets validate this model.
+
+# Validation of simple linear regression model of initial pitch speed and pitch spin direction
+
+```{r residual histogram,message=FALSE}
+simple_spindirspeed_res<-rstandard(pitching_spindirspeed_model$fit)
+ggplot(,aes(x=simple_spindirspeed_res))+
+  geom_histogram()+
+  labs(x='Values of the residuals\n (Actual start speed-predicted start speed)', y='Number of residuals with the value', title='Distribution of residuals',caption='This histogram shows the distribution of the residuals\n for our regression model between spin direction and initial pitch speed.')+
+  theme_few()+
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+The distribution of residuals (actual start speed-predicted start speed) for this model appears to be skewed left, but not very skewed left. In addition, the center of this distribution appears to be about 0 which is good. This indicates that we have an ok model here.
+
+Now lets check out the distribution of spin direction for different pitch types in the MLB from 2015-2018.
+
+# MLB Pitch Spin Direction by Pitch Type
+
+```{r box plots of spin direction by pitch type}
+ggplot(PitchingData,aes(x=pitch_type,y=spin_dir,fill=pitch_type))+
+  geom_boxplot(notch=TRUE,outlier.color ="gray")+
+  labs(x="Pitch Type",y='Pitch spin direction',title="Distribution of pitch spin direction for different pitch types",caption='These box plots show the distribution of\n spin direction for different types of pitches in the MLB from 2015-2018.',fill="Pitch Type")+
+  theme_few()+
+  theme(axis.text.x = element_text(angle=75, vjust=.7))+
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+Looking these box plots, there appears to be a clear difference in spin direction between the different pitch types. The Curve ball distribution of spin direction appears to have a larger variability than all the other distributions with an IQR of about 260 degrees. The curveball distribution is skewed right and appears to centered around a pitch spin direction of about 60 (leftward spin). The Two-Seam Fastball, Changeup, and Sinker distributions all appear to be centered around about the same spin direction of 220 (between a forward and rightward spin) at the same variability and shape with no outliers. The Knuckle Curve pitch type appears to have the lowest center out of all the distributions of about 40 (about a leftward spin). The Four-Seam Fastball Distribution has a low variability considering that it is most frequent pitch type in this dataset with an IQR of about 30, centered around about 200, and has many outliers. The slider distribution is the only symmetric distribution out of these boxplots and is centered at about 150 (between leftward and forward spin).
+
+# Next steps after describing the distribution of spin direction between the different pitch types
+
+Considering the Changeup, Sinker, and Two-seam Fastball distributions of spin direction were very similar, I will run a two-sample t-test to compare the mean pitch spin direction between two of these different types of pitches. For all the other pitch types, I will just consider that they are distinctly different right now.
+
+# Two-sample t-test to Compare Mean Pitch Spin Direction between Sinker and Two-Seam Fastball
+
+```{r two-sample t-tests}
+sITSF_pitches<-PitchingData%>%
+  filter(pitch_type=='Sinker'|pitch_type=='Two-seam Fastball')
+cHTSF_pitches<-PitchingData%>%
+  filter(pitch_type=='Changeup'|pitch_type=='Two-seam Fastball')
+t.test(spin_dir~pitch_type,sITSF_pitches)
+```
+
+T-test of mean pitch spin direction by Sinker and Two-seam Fastball-
+
+The t-statistic, degrees of freedom, and p-value of this T-test came out to be -17.03, 458214, and 2.2e-16 respectively. The 95 percent confidence interval came out to be between -2.830551 and -2.246256 (narrow likely due to very large sample sizes) with its point estimate (middle of the confidence interval) or the sample mean difference being about -2.5384035. Since our p-value (2.2e-16) is less than any reasonable significance level, we can reject the null hypothesis that there is no difference between the pitch type of Two-seam Fastball and the pitch type of Sinker in mean spin direction. We have convincing evidence that that there is a difference between the pitch type of Two-seam Fastball and the pitch type of Sinker in mean spin direction.
+
+This rejects what I saw in the Boxplots where the mean spin direction of the Two-seam Fastball pitch type was about the same as the mean spin direction of the Sinker pitch type. Intuitively, I don't think there is much of a difference between the Sinker distribution's mean spin direction (201.4943) and the Two-seam Fastball distribution's mean spin direction (204.0327), but the t-test must have said it was statistically significant because of there being so many Sinker and Fastball pitches (sample size).
+
+Now, lets switch gears again and look at the initial pitch speed (in mph) among different pitch results and zones in the batters box pitches hit. This will help contribute to the final part of this report which is trying to predict the speed of a pitch next time it is thrown in an MLB game.
+
+# Analyzing the relationship between the initial speed of a pitch and pitch results or zones in the batters box pitches hit
+
+```{r histograms, message=FALSE, warning=FALSE}
+ggplot(PitchingData,aes(start_speed))+
+  geom_histogram(aes(fill=pitch_result))+
+  labs(x="Speed when the pitch is initially released",y='Number of pitches',title="Distribution of speed when pitches are initially released\n for different pitch results",caption='These histograms show the distribution of initial speed\n for different results of pitches in the MLB from 2015-2018.',fill="Pitch Result")+
+  theme_few()+
+  facet_wrap(~pitch_result)+
+  theme(strip.text.x = element_text(
+    size = 12, color = "darkblue", face = "bold"))+
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+Looking at these histograms, it appears that distribution of speed when pitches are initially released, given the amount of times the different pitch results appear in the data, is very similar between the Ball, Foul, Called Strike, In play, out(s), In play, no out(s), and In play, run(s) pitch results. All those distributions appear to have the same skewed left shape and centered around the same initial speed of about 90 miles per hour. This is surprising because I thought that maybe more successful pitch results like a called strike or outs could yield slower initial pitching speed on average than a pitch that leads to runs. Lets keep in mind too that these pitch results that had similar distributions make up almost all the pitch results included in our data. Although the swinging strike and ball in dirt distributions appear to have a lower mean or centered around a lower initial speed than the other distributions, it may not be enough to say that we can use the result of a pitch to predict the speed of a pitch.
+
+Lets run a two sample t-test to compare the mean initial speed between the ball pitch result (the most common result in our data set) and the called strike pitch result (the second most common result in our data set).
+
+# Two sample t-test to compare initial pitch speed between the pitch results of ball and strike
+
+```{r two sample t-test between ball and called strike initial speeds}
+ballcstr_pitches<-PitchingData%>%
+  filter(pitch_result=='Ball'|pitch_result=='Called Strike')
+t.test(start_speed~pitch_result,ballcstr_pitches)
+```
+
+The t-statistic, degrees of freedom, and p-value in this t-test came out to be 1.2052, 941217, and 0.2281 respectively. The 95 confidence interval for the sample mean difference in start speed in this t-test came out to be between -0.008096119 and 0.033949580. The sample mean difference for start pitch speed or point estimate of the confidence interval is about 0.01293 (very small). Since our p-value (0.2281), is greater than any reasonable significance level, we fail to reject the null hypothesis that the difference between the ball pitch result and the called strike pitch result in mean initial speed is 0. We do not have convincing evidence that the true difference in mean start speed between the ball pitch result and the strike pitch result is not equal to 0.
+
+Intuitively, the result that there is not significant evidence of a difference in mean start speed between the ball pitch result and called strike pitch result makes sense. Pitchers tend to throw the same type of pitch when they throw a ball or a strike, leading to about the same pitch speed between the two pitch results. Yet, there could also be some error in these two different pitch results of Ball or Strike because these ball or strike results were collected based on what umpires called in MLB games (ex. umpire calling ball when the pitch actually hit inside the batters box), since one of the original purposes of this data set was to analyze umpire accuracies using this variable.
+
+Given this error, lets look at a variable that more accurately tracks the location of the batters box that pitches hit: Zone. This one is actually tracked by the operation systems that were used to collect this data. Lets see if the initial speed of a pitch can be predicted based on the zone or area of the batters box the pitch hits.
+
+# Looking at the relationship between the zone of a batters box a pitch hits and the initial speed of a pitch
+
+```{r zone violin plots}
+ggplot(PitchingData,aes(x=zone,y=start_speed,fill=zone))+
+  geom_violin()+
+  labs(x="Zone of the batters box the pitch hits",y='Speed of a pitch when it is\n initially released',title="Distribution of speed from where pitches are initially released\n for different batter box zones pitches hit",caption='These violin plots show the distribution of initial pitch speed\n for different zones of the batters box the pitches hit in the MLB from 2015-2018.',fill="Zone of the batters box")+
+  theme_few()+
+  theme(axis.text.x = element_text(angle=75, vjust=.6))+
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+Interestingly, looking at these Violin Plots, it appears that there is a distinct difference in the distributions of initial pitch speed as we move towards the distributions about bottom of the batters box. The distributions of initial pitch speed at the upper zones of the batters box (Upper left, Upper middle, Upper right, Upper outside left, and Upper outside right) appear to all be very skewed left and centered around a higher pitch speed of about 90. The distribution of initial pitch speed at the middle zones of the batters box (Middle left, Middle, and Middle right) appear to still be skewed left, but not as badly as the upper zone distributions. This means that these middle zone distributions of initial pitch speed are likely centered around a lower mean initial speed than the upper zone distributions. Now if we look at the distribution of initial pitch speed at the lower zones of the batter box (Bottom left, Bottom middle, Bottom right, Bottom Outside left, and Bottom Outside right), it appears that these distributions are only slightly skewed left, and not skewed left as badly as the middle zone or upper zone distributions. This means that these bottom zone distributions of inital pitch speed are likely centered around an even lower mean initial speed than the middle zone distribution. Therefore, it looks clear that as a pitch decreases in initial speed, it is more likely to hit a lower zone of the batters box. This means that our zone variable could help predict the initial speed of a pitch.
+
+Lets run a two sample t-test for a difference in mean start speed between the bottom middle zone and the top middle zone.
+
+# Two sample t-test to see if the initial pitch speed is greater for pitches that hit the top middle zone than pitches that hit the bottom middle zone
+
+```{r two samp t-test between zones}
+bottop_pitchzones<-PitchingData%>%
+  filter(zone=='Top middle'|zone=='Bottom middle')
+t.test(start_speed~zone,bottop_pitchzones,alternative='greater')
+```
+
+The t-statistic, degrees of freedom, and p-value in this test came out to be 90.441, 227091, and 2.2e-16 (.0000..22) respectively. The 95 percent confidence interval came out to be between 2.105942 and 2.199241, with the sample mean start speed difference being 2.1525915. The mean initial speed for pitches thrown in the top middle zone came out to be 90.08212, while the mean initial speed for pitches thrown in the bottom middle zone came out to be 87.92953 (pretty noticeable and expected difference). Since our p-value (2.2e-16) is lower than any reasonable significance level, we can reject the null hypothesis that there is no difference between the top middle zone and bottom middle zone in initial pitch speed. We have convincing evidence that the initial pitch speed for the top middle zone is greater than the initial pitch speed for the bottom middle zone.
+
+Based on this t-test showing a statisticaly significant difference between the top middle and bottom middle pitch zone where the initial pitch speed for the top middle zone is greater than the bottom middle zone, we can be confident that the zone of the batters box that a pitch hits could help predict the speed of a pitch when initially released.
+
+Finally, lets see the relationship between the spin rate of a pitch and the speed of a pitch when initially released.
+
+# Analyzing the relationship between the initial speed of a pitch and the initial spin rate of a pitch
+
+```{r pitch start speed vs spin rate scatterplot, message=FALSE, warning=FALSE}
+ggplot(PitchingData,aes(x=spin_rate,y=start_speed))+
+  geom_jitter(alpha=1/10)+
+  geom_smooth(method='lm')+
+labs(x='Spin rate (in revolutions per minute) when a pitch\n is initially released',y='Speed (in miles per hour) when a pitch\n is initially released',title='Spin rate vs speed\n when pitches are initially released', caption='This sccaterplot shows the relationship between\n spin rate and speed when pitches are initially released in the MLB from 2015-2018')+
+  theme_few()+
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+Looking at this scatterplot, it appears that the relationship between spin rate (numbered between 0 and 4000) and start speed is positive, linear, and slightly moderately strong. It can be seen on this scatterplot that as the spin rate of pitches increase, there are more high initial speeds than there are low initial speeds. This prompts me to run a simple (two variable) linear regression test to look more into this relationship.
+
+```{r simple linear regression between spin rate and start speed}
+pitching_srspeed_model<-linear_reg()%>%
+  set_engine('lm')%>%
+  fit(start_speed~spin_rate,data=PitchingData)
+summary(pitching_srspeed_model$fit)
+```
+
+# Interpretation of the Spin Rate and Initial Speed Regression Model
+
+Model inputs- We gave this model actual values of the speed of pitches when initially released and spin rate in an effort to obtain the linear regression line showcasing this relationship.
+
+Residuals (actual initial pitch speed-predicted initial pitch speed)- With the minimum residual being much further away from the median than the maximum residual and the median being somewhat close to zero with the Q1 and Q3 residuals being roughly equal distance from 0, the residuals appear to be somewhat normally distributed at first glance. This indicates that we may have an ok abd reliable model.
+
+Coefficients- The y-intercept of this linear regression model came out to be 80.15, meaning that when spin rate is zero, initial pitch speed is 80.15. This y-intercept is shown to be statistically significant with a very low p-value (\<2e-16). The slope of this linear regression model came out to be .004824, meaning that for each additional 1 point increase in spin rate, initial pitch speed goes up by .004824 (this is decent considering that spin rate is numbered between 0 and as high as 4000). With a slope of .004824 and a very low p-value (\<2e-16), it is statistically proven that as spin rate increases, initial pitch speed increases.
+
+R2 Value (variability in start_speed accounted for)- The R2 Value in this simple linear regression came out to be 0.3092, meaning that 30.92% of the variability in the initial speed of a pitch is accounted for by spin rate. This R2 value is shown to be statistically significant with a p-value of 2.2e-16 (.000...2) Considering that pitch speed is a relatively unpredictable measure, an R2 value of 0.3092 is good. Spin rate may do a decent job on predicting initial pitch speed.
+
+Takeaways from this model- We cannot be confident that this a reliable model yet because the residuals appeared to only be somewhat normally distributed at first glance. However, it was shown in this model that as spin rate increases, the initial speed of a pitch increases. In addition, spin rate may do a decent job in predicting initial speed of pitches overall. Lets create a histogram of the residuals again to see if this model is truly reliable.
+
+Now lets validate this model.
+
+# Validation of the initial spin rate and initial pitch speed regression model.
+
+```{r 2nd residual histogram,message=FALSE}
+simple_srspeed_res<-rstandard(pitching_srspeed_model$fit)
+ggplot(,aes(x=simple_srspeed_res))+
+  geom_histogram()+
+  labs(x='Values of the residuals\n (Actual start speed-predicted start speed)', y='Number of residuals with the value', title='Distribution of residuals',caption='This histogram shows the distribution of residuals for\n the spin rate vs initial speed regression model.')+
+  theme_few()+
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+Looking at this residual histogram for our model looking at the relationship between initial speed and initial spin rate for pitches, it appears that aside from a slight tail of values on the left side of the residual distribution, the residuals seem to be roughly normally distributed and centered around a mean residual of 0. This distribution indicates that we may have a decent model on our hands.
+
+# Summary of what we know so far
+
+Regarding the horizontal acceleration of MLB pitches from 2015-2018, we know that horizontal acceleration differs between several pitch types and that it is generally either positive or negative, on average, across all pitch types. In addition, the initial speed of a pitch could somewhat be predicted by horizontal acceleration where it slightly decreases for every additional increase in horizontal acceleration.
+
+Regarding the year MLB pitches were thrown, we know that there is a statistically significant difference between the year of 2015 and the year of 2018 in initial pitch speed despite it seeming small. This indicates that the year an MLB pitch is thrown between 2015 and 2018 could possibly predict the initial speed of an MLB pitch.
+
+Regarding the spin direction and spin rate of MLB pitches, we know that spin direction clearly differs across different types of MLB pitches. We also know that spin direction could predict the initial speed of MLB pitches where for every additional increase in the spin direction of a pitch (changes clockwise around a ball), the speed of an MLB pitch may slightly increase. In addition, more than horizontal acceleration and spin direction that account for just about 8% of the variability in initial pitch speed, we know that spin rate accounts for 30% of the variability of initial pitch speed. So, spin rate may do good and better job at predicting initial pitch speed than spin direction or horizontal acceleration. As the spin rate of an MLB pitch increases, the speed of an MLB pitch was shown to be predicted to increase.
+
+Regarding the pitch result and zone of the batters box MLB pitches hit, we know that there did not appear to be a relationship between pitch result and initial speed of MLB pitches looking at a t-test between the two most common pitch results in this data set, ball and called strike. However, there was a clear relationship found between the zone of the batters box a pitch hits and initial pitch speed. The lower the zone of the batters box a pitch hits, the lower the initial speed of the pitch is going to be.
+
+# Big next step based on what we know
+
+To finish this analysis, I will create a final linear regression model that can be used to predict the initial speed of an MLB pitch each a pitch is thrown in an MLB game. Given what I discovered here and knowledge I already have about baseball, the dependent variable I plan to use in this model is start_speed, and, more importantly, the independent variables (the variables I think could best help predict the initial speed of a pitch) I plan to use include: year, spin_rate, spin_direction, ax, and zone. I did think about pitch type predicting the initial speed of a pitch, but as we see in the summary and what we found above, there is a relationship between pitch type and several of these independent variables. That would introduce multicollinearity (independent variables that have a relationship with each other) into our model.
+
+Before I create this final model, lets make sure there is little to no relationship between the independent variables we plan to put in our model (no multicollinearity).
+
+# Testing for multicolinearity between our independent variables
+
+```{r ggpairs for our independent variables, warning=FALSE, message=FALSE}
+ggpairs(PitchingData, columns=c('year','spin_rate','spin_dir','ax','zone'))+
+  labs(title='Distributions, Scatterplots, and correlation values\n between the variables year, zone, spin_rate, spin_dir, and ax',caption='These ggpairs plots show if there\n is a relationship between the variables year, zone, spin_rate, spin_dir, or ax')+
+  theme_few()+
+  theme(plot.title=element_text(hjust=0.5))
+```
+
+Looking at these scatterplots, histograms, frequency polygons, and correlation values, I could either take spin direction or spin rate out of this final regression model. A statistically significant, weak, positive correlation was found between spin direction and initial spin rate of a pitch (0.196) and this is confirmed by the scatterplot between those two variables (third row, second column). A statistically significant, weak, negative correlation was found between spin rate and ax (-0.192) and this is confirmed by the scatterplot between those two variables (fourth row, second column). Looking at the histogram at the top right (first row, fifth column), the zone and year variable don't appear to be related with the frequencies of the different zones pitches hit the batters box not changing much year to year. The main thing to point out here is that our horizontal acceleration variable (ax) is highly correlated with our spin direction variable (spin_dir) with a statistically significant, negative correlation value of -.730. This correlation is confirmed by the scatterplot between these two variables, shaped like a downward sloping bow tie, on row 4 and column 2 of this ggpairs. So, knowing that I have to take either the ax or spin_dir variable out of my final model, I will take the spin_dir variable out of my final model since its correlation with spin rate (0.196) was slightly higher than ax's correlation with spin rate (-0.192).
+
+So, I will be using the variables of ax, spin_rate, zone, and year in this model that helps predict the initial speed of an MLB pitch.
+
+# Multiple linear regression model (multiple linear regression equations) to help predict the speed of a pitch next time it is thrown in an MLB game
+
+```{r multiple linear regression}
+pitching_speed_model<-linear_reg()%>%
+  set_engine('lm')%>%
+  fit(start_speed~zone+year+spin_rate+ax,data=PitchingData)
+summary(pitching_speed_model$fit)
+```
+
+# Interpretation of Multiple Linear regression model between initial pitch speed and year, zone pitches hit the batters box at, horizontal acceleration, and initial spin rate
+
+Model inputs- We gave this model actual values of the speed of pitches when initially released, horizontal acceleration, spin rate, year, and zone in an effort to obtain the linear regression lines in this model showcasing the relationships.
+
+Residuals (actual initial pitch speed-predicted initial pitch speed)- The minimum residual (-61.792) is much further away from the median than the maximum residual (16.198). However, th median residual is somewhat close to 0 (0.809) and the Q1 and Q3 residuals appear to be roughly equal distance from the median. The residuals appear to be somewhat normally distributed at first glance. This indicates that we may have an ok and somewhat reliable model.
+
+Coefficients- First of all, with a very low p-value (at least 1.1e-07 or .00000011 for all coefficients), the y-intercept and all the slopes in this model are statistically significant. The y-intercept in this multiple linear regression model came out to be 81.34, meaning that with the year of 2015 as the baseline, the zone of Upper left as the baseline, spin rate being 0, and horizontal acceleration being 0, the initial speed of a pitch is predicted to be 81.34 miles per hour.
+
+-Zone Variable (zone of the batters box a pitch hits) slopes: The slopes for the upper zones of our zone variable, using the upper left zone as the baseline, came out to be .2239 (Top Middle) and .3038 (Top Upper Right). These slightly positive slopes mean that when pitches are thrown in the upper zones of the batters box, the initial speed of the pitches are predicted to slightly increase compared to when pitches are thrown to the upper left zone of the batters box. The slopes for the middle zones of our zone variable, using the upper left zone as the baseline, came out be -.6506 (Middle left), -.4947 (middle), and -.2630 (middle right). These slightly negative slopes mean that when pitches are thrown in the middle zones of the batters box, the initial speed of the pitches are predicted to slightly decrease compared to when pitches are thrown to the upper left zone of the batters box. The slopes for the bottom zones of our zone variable, using the upper left zone as the baseline, came out to be -1.432 (Bottom left), -1.287 (Bottom middle), and -.9280 (Bottom right). These negative slopes mean that when pitches are thrown in the bottom zones of the batters box, the initial speed of the pitches are predicted to decrease compared to when pitches are thrown to the upper left zone of the batters box. The slopes for the outside zones of our zone variable came out to be -.1736 (Upper Outside left), .2740 (Upper Outside right), -1.804 (Bottom Outside left), and -1.199 (Bottom Outside right). The two negative slopes for the bottom outside zones mean that when pitches are thrown in the bottom zones outside of the batters box, the initial speed of the pitches are predicted to decrease compared to when pitches are thrown to the upper left zone of the batters box. The slightly positive and the slightly negative slopes for the upper outside right and upper outside left zones respectively mean that when pitches are thrown in the upper zones outside of the batters box, the initial speed of the pitches are predicted to slightly decrease or increase compared to when pitches are thrown in the upper left zone of the batters box.
+
+-year variable slopes: The slopes of the two even years of 2016 and 2018 came out to be .04339 and .4992 respectively. For the slope of the year 2016, this means that when a pitch is thrown in the year of 2016, the initial speed of the pitch is expected to not change compared to when a pitch is thrown in the year of 2015. For the slope of the year 2018, this means that when a pitch is thrown in the year of 2018, the initial speed of the pitch is expected to slightly increase compared to when a pitch is thrown in the year of 2015. The slope for the year of 2017 came out to be -.1771, meaning that when a pitch is thrown in the year of 2017, the initial speed of the pitch is expected to slightly decrease compared to when a pitch is thrown in the year of 2015.
+
+-spin_rate and ax (horizontal acceleration) variable slopes: The slope of the spin rate variable came out to be .004403, meaning for every additional 1 point increase in spin rate, initial pitch speed is expected to increase by .004403 (good considering that spin rate is numbered between 0 and as high as 4000 revolutions per minute). Considering that this slope is statistically significant, as the spin rate of a pitch increases, the initial pitch speed is expected to increase. The slope of the ax variable came out to be -.1055, meaning for every additional 1 point increase in horizontal acceleration (in feet per second per second), initial pitch speed is expected to very slightly decrease -.1055. Considering that this slope is statistically significant, as the horizontal acceleration of a pitch increases, the initial pitch speed is expected to very slightly decrease.
+
+R2 Value (variability in start_speed accounted for)- The R2 Value in this multiple linear regression came out to be 0.3596, meaning that 35.96% of the variability in the initial speed of a pitch is accounted for by horizontal acceleration, zone, year, and spin_rate. This R2 value is shown to be statistically significant with a p-value of 2.2e-16 (.000...2). Considering that pitch speed is a relatively unpredictable measure, an R2 value of 0.3596 is solid, but not great. Horizontal acceleration, year, zone, and spin rate does a decent job on predicting initial pitch speed.
+
+Takeaways from this model- We cannot be confident that this a reliable model yet because the residuals did only appear to be somewhat normally distributed at first glance. However, it was shown in this model that as horizontal acceleration increases, the initial speed of an MLB pitch is expected to slightly decrease. As year increases, using 2015 as the base year, the initial speed of an MLB pitch is generally expected to slightly increase. As spin rate increases, the initial speed of an MLB pitch is expected to increase. As the area of the batters box a pitch hits gets lower (top to bottom of the batters box or outside the batters box), the initial speed of an MLB pitch is expected to decrease. In addition, zone, horizontal acceleration (ax), year, and spin rate may do a decent job at predicting the initial speed of a pitch when thrown in an MLB game.
+
+Lets validate this model.
+
+# Validation of the multiple linear regression model for predicting the initial speed of an MLB pitch
+
+```{r autoplot}
+autoplot(pitching_speed_model$fit)+
+  theme_few()
+```
+
+Looking at these four different residual plots it appears that we have a pretty decent model on our hands. The top right QQ plot shows that the residuals of this model are normally distributed except for a clear deviation from the normal distribution line at left side of the QQ plot. The top left residuals vs fitted plot shows that the blue line (fitted onto the residual values) is flat except for some curvature at the end and it is mostly very close to the gray dash line, indicating that our model is decent once again based on this residual plot. The lower left scale location plot shows that the blue line fitted onto our residuals is slightly bending, meaning that our residuals may have a little bit of heteroscedasticity (deviation from our regression line of fitted values increases), but aside from that the blue line is mostly flat. The lower right Constant leverage residuals vs factor levels (because we have categorical variables in this model) looks not great with a lot of the points having a distance greater than 5 from the gray dashed line. Aside from the bottom right plot, these residual plots indicate that we have a decent model we can use to predict the initial speed of an MLB pitch next time a pitch is thrown in an MLB game.
+
+Now lets use this multiple linear regression model to predict the initial speed of MLB pitches!
+
+# Predicting low, medium, and high speed pitches
+
+```{r predicting different initial speeds of MLB pitches, include=TRUE}
+lowspeedpitch <- tibble(year ='2015',spin_rate=1000, zone='Bottom Outside left',ax=20)
+mediumspeedpitch <- tibble(year ='2016',spin_rate=2000, zone='Middle right',ax=0)
+highspeedpitch <- tibble(year ='2018',spin_rate=3000, zone='Upper right', ax=-20)
+predict(pitching_speed_model, lowspeedpitch)
+predict(pitching_speed_model, mediumspeedpitch)
+predict(pitching_speed_model, highspeedpitch)
+```
+
+These predictions for low, medium, and high speed MLB pitches were based off what I see in the results of my multiple linear regression model. Given that generally, the higher the year the pitch was thrown, the initial speed is expected to be slightly higher, I chose 2015 for the low speed pitch, 2016 for the medium speed pitch, and 2018 for the high speed pitch. Since the higher the spin rate of the pitch, the higher the initial speed is expected to be, I chose 1000 rpm (revolutions per minute) for the low speed pitch, 2000 rpm for the medium speed pitch, and 4000 rpm for the high speed pitch. Initial speed is expected to be lower when a pitch hits lower areas of the batters box, so for the zone variable, I chose the bottom outside left zone for my low speed pitch, the middle right zone for my medium speed pitch, and the upper right zone for my high speed pitch. Initial pitch speed is expected to slightly decrease when horizontal acceleration increases. I chose an ax (horizontal acceleration) of 20 for my low speed pitch, a horizontal acceleration of 0 for my medium speed pitch, and a horizontal acceleration of -20 for my high speed pitch. All these values entered into my predictions for low, medium, and high speed MLB pitches then produced predictions that seem reasonable of 81.8254 mph, 89.92203 mph, and 97.44976 mph respectively.
+
+# Conclusion
+
+In conclusion, it is reasonable to predict the initial speed of a pitch in the MLB between 2015 and 2018 using the values/data of the year the pitch was thrown, the spin rate of the pitch when it was initially released, the horizontal acceleration of the pitch when it was initially released, and the zone of the batters box the pitch hits when it reaches home plate. Initial MLB pitch speed is expected to slightly increase when we move up in year from 2015 to 2018. When initial horizontal acceleration increases, initial MLB pitch speed is expected to slightly decrease. As the zone of the batters box MLB pitches hit from 2015 to 2018 gets lower, the initial speed of MLB pitches decreases. When the spin rate of MLB pitches increases, the initial speed of MLB pitches is expected to increase. In addition, we also learned that there is almost no relationship between initial MLB pitch speed and pitch results. We learned that spin direction and horizontal acceleration differs between different pitch types too.
+
+However, there are some clear limitations of this data that we just explored and analyzed. The MLB pitch data only has pitches in the years of 2015-2018. We could have found different, or even more interesting results, if we found a data set on MLB pitches during more recent years of 2019 or 2020. This may be due to the fact that during more recent years, more MLB pitchers were cheating by applying sticky foreign substances to balls that were pitched. This may also explain why we saw that the average initial pitch speed in the MLB in 2018 (88.72224) was slightly higher than the average initial pitch speed in the MLB in 2015 (88.37486). Yet maybe that change is more noticeable when we reach more recent years. In addition, this data never included the innings pitches were thrown in, pitcher names, the hand the pitcher is throwing with, stadium attendance when the pitch was thrown, etc. It's clear that this data is not fully accurate either due to technological error and the error of umpires in calling pitch results. I would envision future data analysts adding in additional data into this pitching data set and trying to figure out how we could predict other aspects of MLB pitches besides just speed. They may try to predict the type of pitch that will be thrown next time a pitch is thrown in an MLB game, the location of an MLB pitch, or predict the number of batters that will be on base when an MLB pitch is thrown. They may do this using more recent data about MLB pitches.
+
+[Article that goes more into detail on predicting pitch location with different release variables](https://www.frontiersin.org/articles/10.3389/fspor.2020.00036/full)
