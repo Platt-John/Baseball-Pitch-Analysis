@@ -1,7 +1,7 @@
 # ⚾ Baseball Pitch Analysis
 
 ## 📌 Overview
-The goal of this project was to figure out the top predictors of the start speed (in mph) of an MLB pitch between 2015 and 2018, considering factors such as pitch location, acceleration, spin direction, and spin rate.
+The goal of this project was to figure out the **top predictors of the start speed (in mph)** of an MLB pitch between 2015 and 2018, considering factors such as pitch location, acceleration, spin direction, and spin rate.
 This project enables future coaches and MLB pitchers to understand better about how they can improve their in-game performance. I was motivated to do this project because of my desire to perform 
 analysis on a large-scale dataset in addition to my interest in Sports Analytics in general.
 ## 📊 Data
@@ -34,7 +34,7 @@ analysis on a large-scale dataset in addition to my interest in Sports Analytics
 
 6. If errors occur:
 - Verify all packages are installed
-- Confirm 'pitches.csv' is in the working directory
+- Confirm `pitches.csv` is in the working directory
 - Address any error messages
 
 ## 📈 Results
