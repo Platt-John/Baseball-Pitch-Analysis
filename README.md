@@ -38,6 +38,8 @@ analysis on a large-scale dataset in addition to my interest in Sports Analytics
 - Address any error messages
 
 ## 📈 Results
+![Horizontal Acceleration by Pitch Type](figures/Screenshot-2025-08-12-124704.png)
+
 Top predictors of pitch start speed:
 - Year of pitch
 - Initial spin rate
